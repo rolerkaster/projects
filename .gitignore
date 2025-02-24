@@ -1,0 +1,17 @@
+# Временные файлы Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Среды разработки
+env/
+venv/
+*.log
+
+# Секреты
+.env
+
+# Локальные настройки IDE
+.idea/
+.vscode/
