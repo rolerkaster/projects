@@ -1,6 +1,7 @@
 from migrations import get_db_connection
 from datetime import datetime
 import hashlib
+import json
 
 def seed_data():
     conn = get_db_connection()
@@ -21,7 +22,7 @@ def seed_data():
     entities = ["user", "role", "permission"]
     permissions = []
     for entity in entities:
-        for action in ["get-list", "read", "create", "update", "delete", "restore"]:
+        for action in ["get-list", "read", "create", "update", "delete", "restore", "get-story"]:
             permissions.append((f"{action}-{entity}", f"{action} {entity}", f"{action}-{entity}", "admin"))
     cursor.executemany(
         'INSERT OR IGNORE INTO Permissions (name, description, code, created_at, created_by) VALUES (?, ?, ?, ?, ?)',
@@ -59,13 +60,13 @@ def seed_data():
         guest_perms
     )
 
-    # Добавляем начального пользователя Adminuser
+    # Adminuser
     cursor.execute(
         'INSERT OR IGNORE INTO Users (username, email, password_hash, birthday) VALUES (?, ?, ?, ?)',
         ("adminuser", "admin@example.com", hashlib.sha256("Admin123!".encode()).hexdigest(), "1990-01-01")
     )
 
-    # Назначаем пользователю Adminuser роль Admin
+    # Adminuser роль Admin
     cursor.execute(
         'INSERT OR IGNORE INTO UsersAndRoles (user_id, role_id, created_at, created_by) VALUES (?, ?, ?, ?)',
         ("adminuser", role_ids["admin"], datetime.now().isoformat(), "admin")

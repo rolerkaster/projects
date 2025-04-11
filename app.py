@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 import jwt
 import sqlite3
+import json
 
 app = Flask(__name__)
 
@@ -85,6 +86,17 @@ class Permission:
         self.deleted_at = deleted_at
         self.deleted_by = deleted_by
 
+# Модель ChangeLog
+class ChangeLog:
+    def __init__(self, id, entity_type, entity_id, before_change, after_change, created_at, created_by):
+        self.id = id
+        self.entity_type = entity_type
+        self.entity_id = entity_id
+        self.before_change = before_change
+        self.after_change = after_change
+        self.created_at = created_at
+        self.created_by = created_by
+
 # DTO классы
 class UserDTO:
     def __init__(self, user):
@@ -130,6 +142,31 @@ class PermissionCollectionDTO:
 
     def to_dict(self):
         return {"permissions": self.permissions}
+
+class ChangeLogDTO:
+    def __init__(self, changelog):
+        self.id = changelog.id
+        self.entity_type = changelog.entity_type
+        self.entity_id = changelog.entity_id
+        before = json.loads(changelog.before_change)
+        after = json.loads(changelog.after_change)
+        self.changed_properties = {
+            key: {"before": before.get(key), "after": after.get(key)}
+            for key in after
+            if before.get(key) != after.get(key) or key not in before
+        }
+        self.created_at = changelog.created_at
+        self.created_by = changelog.created_by
+
+    def to_dict(self):
+        return self.__dict__
+
+class ChangeLogCollectionDTO:
+    def __init__(self, changelogs):
+        self.changelogs = [ChangeLogDTO(log).to_dict() for log in changelogs]
+
+    def to_dict(self):
+        return {"changelogs": self.changelogs}
 
 # Валидация
 def validate_username(username): return re.match(r'^[A-Z][a-zA-Z]{6,}$', username) is not None
@@ -195,14 +232,40 @@ class RegisterRequest:
         return None
 
     def to_resource(self):
-        hashed_password = hashlib.sha256(self.password.encode()).hexdigest()
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO Users (username, email, password_hash, birthday) VALUES (?, ?, ?, ?)',
-                       (self.username.lower(), self.email, hashed_password, self.birthday))
-        conn.commit()
-        conn.close()
-        return {"username": self.username}
+        try:
+            with conn:
+                cursor = conn.cursor()
+                hashed_password = hashlib.sha256(self.password.encode()).hexdigest()
+                cursor.execute(
+                    'INSERT INTO Users (username, email, password_hash, birthday) VALUES (?, ?, ?, ?)',
+                    (self.username.lower(), self.email, hashed_password, self.birthday)
+                )
+                # Логирование
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'user',
+                        self.username.lower(),
+                        json.dumps({}),
+                        json.dumps({
+                            "username": self.username.lower(),
+                            "email": self.email,
+                            "password_hash": hashed_password,
+                            "birthday": self.birthday
+                        }),
+                        datetime.now().isoformat(),
+                        self.username.lower()
+                    )
+                )
+                conn.commit()
+                return {"username": self.username}
+        except Exception as e:
+            conn.rollback()
+            return {"error": str(e)}, 500
+        finally:
+            conn.close()
 
 # Классы запросов для Role
 class CreateRoleRequest:
@@ -237,13 +300,33 @@ class CreateRoleRequest:
 
     def to_resource(self):
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO Roles (name, description, code, created_at, created_by) VALUES (?, ?, ?, ?, ?)',
-                       (self.name, self.description, self.code, datetime.now().isoformat(), self.created_by))
-        role_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return Role(role_id, self.name, self.description, self.code, datetime.now().isoformat(), self.created_by)
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'INSERT INTO Roles (name, description, code, created_at, created_by) VALUES (?, ?, ?, ?, ?)',
+                    (self.name, self.description, self.code, datetime.now().isoformat(), self.created_by)
+                )
+                role_id = cursor.lastrowid
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'role',
+                        str(role_id),
+                        json.dumps({}),
+                        json.dumps({"name": self.name, "description": self.description, "code": self.code}),
+                        datetime.now().isoformat(),
+                        self.created_by
+                    )
+                )
+                conn.commit()
+                return Role(role_id, self.name, self.description, self.code, datetime.now().isoformat(), self.created_by)
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
 
 class UpdateRoleRequest:
     def __init__(self, role_id, name, description, code, token):
@@ -278,14 +361,36 @@ class UpdateRoleRequest:
 
     def to_resource(self):
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('UPDATE Roles SET name = ?, description = ?, code = ? WHERE id = ?',
-                       (self.name, self.description, self.code, self.role_id))
-        conn.commit()
-        cursor.execute("SELECT * FROM Roles WHERE id = ?", (self.role_id,))
-        role = Role(**dict(cursor.fetchone()))
-        conn.close()
-        return role
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM Roles WHERE id = ?", (self.role_id,))
+                before = dict(cursor.fetchone())
+                cursor.execute(
+                    'UPDATE Roles SET name = ?, description = ?, code = ? WHERE id = ?',
+                    (self.name, self.description, self.code, self.role_id)
+                )
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'role',
+                        str(self.role_id),
+                        json.dumps({"name": before["name"], "description": before["description"], "code": before["code"]}),
+                        json.dumps({"name": self.name, "description": self.description, "code": self.code}),
+                        datetime.now().isoformat(),
+                        self.created_by
+                    )
+                )
+                conn.commit()
+                cursor.execute("SELECT * FROM Roles WHERE id = ?", (self.role_id,))
+                role = Role(**dict(cursor.fetchone()))
+                return role
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
 
 # Классы запросов для Permission
 class CreatePermissionRequest:
@@ -320,13 +425,33 @@ class CreatePermissionRequest:
 
     def to_resource(self):
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO Permissions (name, description, code, created_at, created_by) VALUES (?, ?, ?, ?, ?)',
-                       (self.name, self.description, self.code, datetime.now().isoformat(), self.created_by))
-        perm_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return Permission(perm_id, self.name, self.description, self.code, datetime.now().isoformat(), self.created_by)
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'INSERT INTO Permissions (name, description, code, created_at, created_by) VALUES (?, ?, ?, ?, ?)',
+                    (self.name, self.description, self.code, datetime.now().isoformat(), self.created_by)
+                )
+                perm_id = cursor.lastrowid
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'permission',
+                        str(perm_id),
+                        json.dumps({}),
+                        json.dumps({"name": self.name, "description": self.description, "code": self.code}),
+                        datetime.now().isoformat(),
+                        self.created_by
+                    )
+                )
+                conn.commit()
+                return Permission(perm_id, self.name, self.description, self.code, datetime.now().isoformat(), self.created_by)
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
 
 class UpdatePermissionRequest:
     def __init__(self, perm_id, name, description, code, token):
@@ -361,14 +486,36 @@ class UpdatePermissionRequest:
 
     def to_resource(self):
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('UPDATE Permissions SET name = ?, description = ?, code = ? WHERE id = ?',
-                       (self.name, self.description, self.code, self.perm_id))
-        conn.commit()
-        cursor.execute("SELECT * FROM Permissions WHERE id = ?", (self.perm_id,))
-        perm = Permission(**dict(cursor.fetchone()))
-        conn.close()
-        return perm
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM Permissions WHERE id = ?", (self.perm_id,))
+                before = dict(cursor.fetchone())
+                cursor.execute(
+                    'UPDATE Permissions SET name = ?, description = ?, code = ? WHERE id = ?',
+                    (self.name, self.description, self.code, self.perm_id)
+                )
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'permission',
+                        str(self.perm_id),
+                        json.dumps({"name": before["name"], "description": before["description"], "code": before["code"]}),
+                        json.dumps({"name": self.name, "description": self.description, "code": self.code}),
+                        datetime.now().isoformat(),
+                        self.created_by
+                    )
+                )
+                conn.commit()
+                cursor.execute("SELECT * FROM Permissions WHERE id = ?", (self.perm_id,))
+                perm = Permission(**dict(cursor.fetchone()))
+                return perm
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
 
 # Классы запросов для UsersAndRoles
 class AssignRoleRequest:
@@ -401,12 +548,20 @@ class AssignRoleRequest:
 
     def to_resource(self):
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO UsersAndRoles (user_id, role_id, created_at, created_by) VALUES (?, ?, ?, ?)',
-                       (self.user_id, self.role_id, datetime.now().isoformat(), self.created_by))
-        conn.commit()
-        conn.close()
-        return {"user_id": self.user_id, "role_id": self.role_id}
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'INSERT INTO UsersAndRoles (user_id, role_id, created_at, created_by) VALUES (?, ?, ?, ?)',
+                    (self.user_id, self.role_id, datetime.now().isoformat(), self.created_by)
+                )
+                conn.commit()
+                return {"user_id": self.user_id, "role_id": self.role_id}
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
 
 # Классы запросов для RolesAndPermissions
 class AssignPermissionRequest:
@@ -439,17 +594,26 @@ class AssignPermissionRequest:
 
     def to_resource(self):
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO RolesAndPermissions (role_id, permission_id, created_at, created_by) VALUES (?, ?, ?, ?)',
-                       (self.role_id, self.perm_id, datetime.now().isoformat(), self.created_by))
-        conn.commit()
-        conn.close()
-        return {"role_id": self.role_id, "perm_id": self.perm_id}
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'INSERT INTO RolesAndPermissions (role_id, permission_id, created_at, created_by) VALUES (?, ?, ?, ?)',
+                    (self.role_id, self.perm_id, datetime.now().isoformat(), self.created_by)
+                )
+                conn.commit()
+                return {"role_id": self.role_id, "perm_id": self.perm_id}
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
 
 # Контроллер для Role
 class RoleController:
     def get_list(self, token):
-        if not self._check_permission(token, "get-list-role"): return jsonify({"error": "Permission 'get-list-role' required"}), 403
+        if not self._check_permission(token, "get-list-role"):
+            return jsonify({"error": "Permission 'get-list-role' required"}), 403
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM Roles WHERE deleted_at IS NULL")
@@ -458,59 +622,154 @@ class RoleController:
         return jsonify(RoleCollectionDTO(roles).to_dict()), 200
 
     def get_role(self, role_id, token):
-        if not self._check_permission(token, "read-role"): return jsonify({"error": "Permission 'read-role' required"}), 403
+        if not self._check_permission(token, "read-role"):
+            return jsonify({"error": "Permission 'read-role' required"}), 403
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM Roles WHERE id = ? AND deleted_at IS NULL", (role_id,))
         row = cursor.fetchone()
         conn.close()
-        if not row: return jsonify({"error": "Role not found"}), 404
+        if not row:
+            return jsonify({"error": "Role not found"}), 404
         return jsonify(RoleDTO(Role(**dict(row))).to_dict()), 200
 
     def create(self, req: CreateRoleRequest):
-        if not self._check_permission(req.token, "create-role"): return jsonify({"error": "Permission 'create-role' required"}), 403
+        if not self._check_permission(req.token, "create-role"):
+            return jsonify({"error": "Permission 'create-role' required"}), 403
         validation = req.validate()
-        if validation: return jsonify(validation[0]), validation[1]
-        role = req.to_resource()
-        return jsonify(RoleDTO(role).to_dict()), 201
+        if validation:
+            return jsonify(validation[0]), validation[1]
+        try:
+            role = req.to_resource()
+            return jsonify(RoleDTO(role).to_dict()), 201
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     def update(self, req: UpdateRoleRequest):
-        if not self._check_permission(req.token, "update-role"): return jsonify({"error": "Permission 'update-role' required"}), 403
+        if not self._check_permission(req.token, "update-role"):
+            return jsonify({"error": "Permission 'update-role' required"}), 403
         validation = req.validate()
-        if validation: return jsonify(validation[0]), validation[1]
-        role = req.to_resource()
-        return jsonify(RoleDTO(role).to_dict()), 200
+        if validation:
+            return jsonify(validation[0]), validation[1]
+        try:
+            role = req.to_resource()
+            return jsonify(RoleDTO(role).to_dict()), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     def delete(self, role_id, token):
-        if not self._check_permission(token, "delete-role"): return jsonify({"error": "Permission 'delete-role求required"}), 403
+        if not self._check_permission(token, "delete-role"):
+            return jsonify({"error": "Permission 'delete-role' required"}), 403
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM Roles WHERE id = ?", (role_id,))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "Role deleted"}), 200
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM Roles WHERE id = ?", (role_id,))
+                before = dict(cursor.fetchone())
+                cursor.execute("DELETE FROM Roles WHERE id = ?", (role_id,))
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'role',
+                        str(role_id),
+                        json.dumps({"name": before["name"], "description": before["description"], "code": before["code"]}),
+                        json.dumps({}),
+                        datetime.now().isoformat(),
+                        jwt.decode(token, SECRET_KEY, algorithms=["HS256"])["username"]
+                    )
+                )
+                conn.commit()
+                return jsonify({"message": "Role deleted"}), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
     def soft_delete(self, role_id, token):
-        if not self._check_permission(token, "delete-role"): return jsonify({"error": "Permission 'delete-role' required"}), 403
+        if not self._check_permission(token, "delete-role"):
+            return jsonify({"error": "Permission 'delete-role' required"}), 403
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('UPDATE Roles SET deleted_at = ?, deleted_by = ? WHERE id = ? AND deleted_at IS NULL',
-                       (datetime.now().isoformat(), payload["username"], role_id))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "Role soft deleted"}), 200
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM Roles WHERE id = ?", (role_id,))
+                before = dict(cursor.fetchone())
+                cursor.execute(
+                    'UPDATE Roles SET deleted_at = ?, deleted_by = ? WHERE id = ? AND deleted_at IS NULL',
+                    (datetime.now().isoformat(), payload["username"], role_id)
+                )
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'role',
+                        str(role_id),
+                        json.dumps({"name": before["name"], "description": before["description"], "code": before["code"]}),
+                        json.dumps({
+                            "name": before["name"],
+                            "description": before["description"],
+                            "code": before["code"],
+                            "deleted_at": datetime.now().isoformat()
+                        }),
+                        datetime.now().isoformat(),
+                        payload["username"]
+                    )
+                )
+                conn.commit()
+                return jsonify({"message": "Role soft deleted"}), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
     def restore(self, role_id, token):
-        if not self._check_permission(token, "restore-role"): return jsonify({"error": "Permission 'restore-role' required"}), 403
+        if not self._check_permission(token, "restore-role"):
+            return jsonify({"error": "Permission 'restore-role' required"}), 403
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('UPDATE Roles SET deleted_at = NULL, deleted_by = NULL WHERE id = ?', (role_id,))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "Role restored"}), 200
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM Roles WHERE id = ?", (role_id,))
+                before = dict(cursor.fetchone())
+                cursor.execute(
+                    'UPDATE Roles SET deleted_at = NULL, deleted_by = NULL WHERE id = ?',
+                    (role_id,)
+                )
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'role',
+                        str(role_id),
+                        json.dumps({
+                            "name": before["name"],
+                            "description": before["description"],
+                            "code": before["code"],
+                            "deleted_at": before["deleted_at"]
+                        }),
+                        json.dumps({
+                            "name": before["name"],
+                            "description": before["description"],
+                            "code": before["code"]
+                        }),
+                        datetime.now().isoformat(),
+                        jwt.decode(token, SECRET_KEY, algorithms=["HS256"])["username"]
+                    )
+                )
+                conn.commit()
+                return jsonify({"message": "Role restored"}), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
-    def _check_permission(self, token, permission_code):
+    @staticmethod
+    def _check_permission(token, permission_code):
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -534,7 +793,8 @@ class RoleController:
 # Контроллер для Permission
 class PermissionController:
     def get_list(self, token):
-        if not self._check_permission(token, "get-list-permission"): return jsonify({"error": "Permission 'get-list-permission' required"}), 403
+        if not self._check_permission(token, "get-list-permission"):
+            return jsonify({"error": "Permission 'get-list-permission' required"}), 403
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM Permissions WHERE deleted_at IS NULL")
@@ -543,64 +803,159 @@ class PermissionController:
         return jsonify(PermissionCollectionDTO(perms).to_dict()), 200
 
     def get_permission(self, perm_id, token):
-        if not self._check_permission(token, "read-permission"): return jsonify({"error": "Permission 'read-permission' required"}), 403
+        if not self._check_permission(token, "read-permission"):
+            return jsonify({"error": "Permission 'read-permission' required"}), 403
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM Permissions WHERE id = ? AND deleted_at IS NULL", (perm_id,))
         row = cursor.fetchone()
         conn.close()
-        if not row: return jsonify({"error": "Permission not found"}), 404
+        if not row:
+            return jsonify({"error": "Permission not found"}), 404
         return jsonify(PermissionDTO(Permission(**dict(row))).to_dict()), 200
 
     def create(self, req: CreatePermissionRequest):
-        if not self._check_permission(req.token, "create-permission"): return jsonify({"error": "Permission 'create-permission' required"}), 403
+        if not self._check_permission(req.token, "create-permission"):
+            return jsonify({"error": "Permission 'create-permission' required"}), 403
         validation = req.validate()
-        if validation: return jsonify(validation[0]), validation[1]
-        perm = req.to_resource()
-        return jsonify(PermissionDTO(perm).to_dict()), 201
+        if validation:
+            return jsonify(validation[0]), validation[1]
+        try:
+            perm = req.to_resource()
+            return jsonify(PermissionDTO(perm).to_dict()), 201
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     def update(self, req: UpdatePermissionRequest):
-        if not self._check_permission(req.token, "update-permission"): return jsonify({"error": "Permission 'update-permission' required"}), 403
+        if not self._check_permission(req.token, "update-permission"):
+            return jsonify({"error": "Permission 'update-permission' required"}), 403
         validation = req.validate()
-        if validation: return jsonify(validation[0]), validation[1]
-        perm = req.to_resource()
-        return jsonify(PermissionDTO(perm).to_dict()), 200
+        if validation:
+            return jsonify(validation[0]), validation[1]
+        try:
+            perm = req.to_resource()
+            return jsonify(PermissionDTO(perm).to_dict()), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     def delete(self, perm_id, token):
-        if not self._check_permission(token, "delete-permission"): return jsonify({"error": "Permission 'delete-permission' required"}), 403
+        if not self._check_permission(token, "delete-permission"):
+            return jsonify({"error": "Permission 'delete-permission' required"}), 403
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM Permissions WHERE id = ?", (perm_id,))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "Permission deleted"}), 200
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM Permissions WHERE id = ?", (perm_id,))
+                before = dict(cursor.fetchone())
+                cursor.execute("DELETE FROM Permissions WHERE id = ?", (perm_id,))
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'permission',
+                        str(perm_id),
+                        json.dumps({"name": before["name"], "description": before["description"], "code": before["code"]}),
+                        json.dumps({}),
+                        datetime.now().isoformat(),
+                        jwt.decode(token, SECRET_KEY, algorithms=["HS256"])["username"]
+                    )
+                )
+                conn.commit()
+                return jsonify({"message": "Permission deleted"}), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
     def soft_delete(self, perm_id, token):
-        if not self._check_permission(token, "delete-permission"): return jsonify({"error": "Permission 'delete-permission' required"}), 403
+        if not self._check_permission(token, "delete-permission"):
+            return jsonify({"error": "Permission 'delete-permission' required"}), 403
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('UPDATE Permissions SET deleted_at = ?, deleted_by = ? WHERE id = ? AND deleted_at IS NULL',
-                       (datetime.now().isoformat(), payload["username"], perm_id))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "Permission soft deleted"}), 200
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM Permissions WHERE id = ?", (perm_id,))
+                before = dict(cursor.fetchone())
+                cursor.execute(
+                    'UPDATE Permissions SET deleted_at = ?, deleted_by = ? WHERE id = ? AND deleted_at IS NULL',
+                    (datetime.now().isoformat(), payload["username"], perm_id)
+                )
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'permission',
+                        str(perm_id),
+                        json.dumps({"name": before["name"], "description": before["description"], "code": before["code"]}),
+                        json.dumps({
+                            "name": before["name"],
+                            "description": before["description"],
+                            "code": before["code"],
+                            "deleted_at": datetime.now().isoformat()
+                        }),
+                        datetime.now().isoformat(),
+                        payload["username"]
+                    )
+                )
+                conn.commit()
+                return jsonify({"message": "Permission soft deleted"}), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
     def restore(self, perm_id, token):
-        if not self._check_permission(token, "restore-permission"): return jsonify({"error": "Permission 'restore-permission' required"}), 403
+        if not self._check_permission(token, "restore-permission"):
+            return jsonify({"error": "Permission 'restore-permission' required"}), 403
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('UPDATE Permissions SET deleted_at = NULL, deleted_by = NULL WHERE id = ?', (perm_id,))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "Permission restored"}), 200
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM Permissions WHERE id = ?", (perm_id,))
+                before = dict(cursor.fetchone())
+                cursor.execute(
+                    'UPDATE Permissions SET deleted_at = NULL, deleted_by = NULL WHERE id = ?',
+                    (perm_id,)
+                )
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'permission',
+                        str(perm_id),
+                        json.dumps({
+                            "name": before["name"],
+                            "description": before["description"],
+                            "code": before["code"],
+                            "deleted_at": before["deleted_at"]
+                        }),
+                        json.dumps({
+                            "name": before["name"],
+                            "description": before["description"],
+                            "code": before["code"]
+                        }),
+                        datetime.now().isoformat(),
+                        jwt.decode(token, SECRET_KEY, algorithms=["HS256"])["username"]
+                    )
+                )
+                conn.commit()
+                return jsonify({"message": "Permission restored"}), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
     _check_permission = RoleController._check_permission
 
 # Контроллер для UsersAndRoles
 class UserRoleController:
     def get_user_roles(self, user_id, token):
-        if not self._check_permission(token, "get-list-role"): return jsonify({"error": "Permission 'get-list-role' required"}), 403
+        if not self._check_permission(token, "get-list-role"):
+            return jsonify({"error": "Permission 'get-list-role' required"}), 403
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -613,67 +968,111 @@ class UserRoleController:
         return jsonify(RoleCollectionDTO(roles).to_dict()), 200
 
     def assign_role(self, req: AssignRoleRequest):
-        if not self._check_permission(req.token, "create-role"): return jsonify({"error": "Permission 'create-role' required"}), 403
+        if not self._check_permission(req.token, "create-role"):
+            return jsonify({"error": "Permission 'create-role' required"}), 403
         validation = req.validate()
-        if validation: return jsonify(validation[0]), validation[1]
-        result = req.to_resource()
-        return jsonify(result), 201
+        if validation:
+            return jsonify(validation[0]), validation[1]
+        try:
+            result = req.to_resource()
+            return jsonify(result), 201
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     def delete_role(self, user_id, role_id, token):
-        if not self._check_permission(token, "delete-role"): return jsonify({"error": "Permission 'delete-role' required"}), 403
+        if not self._check_permission(token, "delete-role"):
+            return jsonify({"error": "Permission 'delete-role' required"}), 403
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM UsersAndRoles WHERE user_id = ? AND role_id = ?", (user_id, role_id))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "Role removed from user"}), 200
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM UsersAndRoles WHERE user_id = ? AND role_id = ?", (user_id, role_id))
+                conn.commit()
+                return jsonify({"message": "Role removed from user"}), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
     def soft_delete_role(self, user_id, role_id, token):
-        if not self._check_permission(token, "delete-role"): return jsonify({"error": "Permission 'delete-role' required"}), 403
+        if not self._check_permission(token, "delete-role"):
+            return jsonify({"error": "Permission 'delete-role' required"}), 403
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('UPDATE UsersAndRoles SET deleted_at = ?, deleted_by = ? WHERE user_id = ? AND role_id = ? AND deleted_at IS NULL',
-                       (datetime.now().isoformat(), payload["username"], user_id, role_id))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "Role soft removed from user"}), 200
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'UPDATE UsersAndRoles SET deleted_at = ?, deleted_by = ? WHERE user_id = ? AND role_id = ? AND deleted_at IS NULL',
+                    (datetime.now().isoformat(), payload["username"], user_id, role_id)
+                )
+                conn.commit()
+                return jsonify({"message": "Role soft removed from user"}), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
     def restore_role(self, user_id, role_id, token):
-        if not self._check_permission(token, "restore-role"): return jsonify({"error": "Permission 'restore-role' required"}), 403
+        if not self._check_permission(token, "restore-role"):
+            return jsonify({"error": "Permission 'restore-role' required"}), 403
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('UPDATE UsersAndRoles SET deleted_at = NULL, deleted_by = NULL WHERE user_id = ? AND role_id = ?', (user_id, role_id))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "Role restored for user"}), 200
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'UPDATE UsersAndRoles SET deleted_at = NULL, deleted_by = NULL WHERE user_id = ? AND role_id = ?',
+                    (user_id, role_id)
+                )
+                conn.commit()
+                return jsonify({"message": "Role restored for user"}), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
     _check_permission = RoleController._check_permission
 
 # Контроллер для RolesAndPermissions
 class RolePermissionController:
     def assign_permission(self, req: AssignPermissionRequest):
-        if not self._check_permission(req.token, "create-permission"): return jsonify({"error": "Permission 'create-permission' required"}), 403
+        if not self._check_permission(req.token, "create-permission"):
+            return jsonify({"error": "Permission 'create-permission' required"}), 403
         validation = req.validate()
-        if validation: return jsonify(validation[0]), validation[1]
-        result = req.to_resource()
-        return jsonify(result), 201
+        if validation:
+            return jsonify(validation[0]), validation[1]
+        try:
+            result = req.to_resource()
+            return jsonify(result), 201
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     def delete_permission(self, role_id, perm_id, token):
-        if not self._check_permission(token, "delete-permission"): return jsonify({"error": "Permission 'delete-permission' required"}), 403
+        if not self._check_permission(token, "delete-permission"):
+            return jsonify({"error": "Permission 'delete-permission' required"}), 403
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM RolesAndPermissions WHERE role_id = ? AND permission_id = ?", (role_id, perm_id))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "Permission removed from role"}), 200
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM RolesAndPermissions WHERE role_id = ? AND permission_id = ?", (role_id, perm_id))
+                conn.commit()
+                return jsonify({"message": "Permission removed from role"}), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
     _check_permission = RoleController._check_permission
 
 # Контроллер для User
 class UserController:
     def get_list(self, token):
-        if not self._check_permission(token, "get-list-user"): return jsonify({"error": "Permission 'get-list-user' required"}), 403
+        if not self._check_permission(token, "get-list-user"):
+            return jsonify({"error": "Permission 'get-list-user' required"}), 403
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM Users")
@@ -681,22 +1080,251 @@ class UserController:
         conn.close()
         return jsonify({"users": users}), 200
 
+    def create(self, req: RegisterRequest):
+        if not self._check_permission(req.token, "create-user"):
+            return jsonify({"error": "Permission 'create-user' required"}), 403
+        validation = req.validate()
+        if validation:
+            return jsonify(validation[0]), validation[1]
+        try:
+            result = req.to_resource()
+            return jsonify(result), 201
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    def update(self, username, token, data):
+        if not self._check_permission(token, "update-user"):
+            return jsonify({"error": "Permission 'update-user' required"}), 403
+        conn = get_db_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM Users WHERE username = ?", (username,))
+                before = dict(cursor.fetchone())
+                if not before:
+                    return jsonify({"error": "User not found"}), 404
+                
+                email = data.get('email', before['email'])
+                password_hash = hashlib.sha256(data['password'].encode()).hexdigest() if data.get('password') else before['password_hash']
+                birthday = data.get('birthday', before['birthday'])
+                
+                cursor.execute(
+                    'UPDATE Users SET email = ?, password_hash = ?, birthday = ? WHERE username = ?',
+                    (email, password_hash, birthday, username)
+                )
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'user',
+                        username,
+                        json.dumps({
+                            "username": before["username"],
+                            "email": before["email"],
+                            "password_hash": before["password_hash"],
+                            "birthday": before["birthday"]
+                        }),
+                        json.dumps({
+                            "username": username,
+                            "email": email,
+                            "password_hash": password_hash,
+                            "birthday": birthday
+                        }),
+                        datetime.now().isoformat(),
+                        jwt.decode(token, SECRET_KEY, algorithms=["HS256"])["username"]
+                    )
+                )
+                conn.commit()
+                cursor.execute("SELECT * FROM Users WHERE username = ?", (username,))
+                user = User(**dict(cursor.fetchone()))
+                return jsonify(UserDTO(user).to_dict()), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+
+    def delete(self, username, token):
+        if not self._check_permission(token, "delete-user"):
+            return jsonify({"error": "Permission 'delete-user' required"}), 403
+        conn = get_db_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM Users WHERE username = ?", (username,))
+                before = dict(cursor.fetchone())
+                if not before:
+                    return jsonify({"error": "User not found"}), 404
+                cursor.execute("DELETE FROM Users WHERE username = ?", (username,))
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        'user',
+                        username,
+                        json.dumps({
+                            "username": before["username"],
+                            "email": before["email"],
+                            "password_hash": before["password_hash"],
+                            "birthday": before["birthday"]
+                        }),
+                        json.dumps({}),
+                        datetime.now().isoformat(),
+                        jwt.decode(token, SECRET_KEY, algorithms=["HS256"])["username"]
+                    )
+                )
+                conn.commit()
+                return jsonify({"message": "User deleted"}), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+
     _check_permission = RoleController._check_permission
+
+# Контроллер для ChangeLog
+class ChangeLogController:
+    def get_user_history(self, user_id, token):
+        if not RoleController._check_permission(token, "get-story-user"):
+            return jsonify({"error": "Permission 'get-story-user' required"}), 403
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM ChangeLogs WHERE entity_type = 'user' AND entity_id = ?",
+            (user_id,)
+        )
+        logs = [ChangeLog(**dict(row)) for row in cursor.fetchall()]
+        conn.close()
+        return jsonify(ChangeLogCollectionDTO(logs).to_dict()), 200
+
+    def get_role_history(self, role_id, token):
+        if not RoleController._check_permission(token, "get-story-role"):
+            return jsonify({"error": "Permission 'get-story-role' required"}), 403
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM ChangeLogs WHERE entity_type = 'role' AND entity_id = ?",
+            (str(role_id),)
+        )
+        rows = cursor.fetchall()
+        print("Fetched rows:", [dict(row) for row in rows])  # Отладочный вывод
+        logs = [ChangeLog(**dict(row)) for row in rows]
+        conn.close()
+        return jsonify(ChangeLogCollectionDTO(logs).to_dict()), 200
+
+    def get_permission_history(self, perm_id, token):
+        if not RoleController._check_permission(token, "get-story-permission"):
+            return jsonify({"error": "Permission 'get-story-permission' required"}), 403
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM ChangeLogs WHERE entity_type = 'permission' AND entity_id = ?",
+            (str(perm_id),)
+        )
+        logs = [ChangeLog(**dict(row)) for row in cursor.fetchall()]
+        conn.close()
+        return jsonify(ChangeLogCollectionDTO(logs).to_dict()), 200
+
+    def revert_mutation(self, log_id, token):
+        conn = get_db_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM ChangeLogs WHERE id = ?", (log_id,))
+                log = cursor.fetchone()
+                if not log:
+                    return jsonify({"error": "Log not found"}), 404
+                
+                entity_type = log["entity_type"]
+                entity_id = log["entity_id"]
+                before_change = json.loads(log["before_change"])
+
+                if not RoleController._check_permission(token, f"update-{entity_type}"):
+                    return jsonify({"error": f"Permission 'update-{entity_type}' required"}), 403
+
+                if entity_type == "user":
+                    cursor.execute(
+                        'UPDATE Users SET username = ?, email = ?, password_hash = ?, birthday = ? WHERE username = ?',
+                        (
+                            before_change.get("username"),
+                            before_change.get("email"),
+                            before_change.get("password_hash"),
+                            before_change.get("birthday"),
+                            entity_id
+                        )
+                    )
+                elif entity_type == "role":
+                    cursor.execute(
+                        'UPDATE Roles SET name = ?, description = ?, code = ? WHERE id = ?',
+                        (
+                            before_change.get("name"),
+                            before_change.get("description"),
+                            before_change.get("code"),
+                            entity_id
+                        )
+                    )
+                elif entity_type == "permission":
+                    cursor.execute(
+                        'UPDATE Permissions SET name = ?, description = ?, code = ? WHERE id = ?',
+                        (
+                            before_change.get("name"),
+                            before_change.get("description"),
+                            before_change.get("code"),
+                            entity_id
+                        )
+                    )
+
+                cursor.execute(
+                    'SELECT * FROM {} WHERE {} = ?'.format(
+                        entity_type.capitalize() + 's',
+                        'username' if entity_type == 'user' else 'id'
+                    ),
+                    (entity_id,)
+                )
+                current_state = dict(cursor.fetchone())
+                cursor.execute(
+                    'INSERT INTO ChangeLogs (entity_type, entity_id, before_change, after_change, created_at, created_by) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        entity_type,
+                        entity_id,
+                        json.dumps(current_state),
+                        json.dumps(before_change),
+                        datetime.now().isoformat(),
+                        jwt.decode(token, SECRET_KEY, algorithms=["HS256"])["username"]
+                    )
+                )
+                
+                conn.commit()
+                return jsonify({"message": "Mutation reverted"}), 200
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
 # Контроллер авторизации
 class AuthController:
     def register(self, req: RegisterRequest):
         validation = req.validate()
-        if validation: return jsonify(validation[0]), validation[1]
-        if "Authorization" in request.headers: return jsonify({"error": "Registration is only for unauthorized users"}), 403
-        resource = req.to_resource()
-        return jsonify(resource), 201
+        if validation:
+            return jsonify(validation[0]), validation[1]
+        if "Authorization" in request.headers:
+            return jsonify({"error": "Registration is only for unauthorized users"}), 403
+        try:
+            resource = req.to_resource()
+            return jsonify(resource), 201
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     def login(self, req: LoginRequest):
         validation = req.validate()
-        if validation: return jsonify(validation[0]), validation[1]
+        if validation:
+            return jsonify(validation[0]), validation[1]
         resource = req.to_resource()
-        if "error" in resource: return jsonify(resource), resource.get("status", 401)
+        if "error" in resource:
+            return jsonify(resource), resource.get("status", 401)
         return jsonify(resource), 200
 
     def get_current_user(self, token):
@@ -706,7 +1334,8 @@ class AuthController:
             cursor.execute("SELECT username FROM Tokens WHERE token = ? AND expires > ?", (token, int(time.time())))
             token_data = cursor.fetchone()
             conn.close()
-            if not token_data: return jsonify({"error": "Invalid or expired token"}), 401
+            if not token_data:
+                return jsonify({"error": "Invalid or expired token"}), 401
             user = User.get_by_username(token_data["username"])
             return jsonify(UserDTO(user).to_dict()), 200
         except jwt.InvalidTokenError:
@@ -753,6 +1382,7 @@ perm_controller = PermissionController()
 user_role_controller = UserRoleController()
 role_perm_controller = RolePermissionController()
 user_controller = UserController()
+changelog_controller = ChangeLogController()
 
 # Маршруты авторизации
 @app.route('/api/auth/register', methods=['POST'])
@@ -817,6 +1447,11 @@ def soft_delete_role(token, role_id):
 def restore_role(token, role_id):
     return role_controller.restore(role_id, token)
 
+@app.route('/api/ref/policy/role/<int:role_id>/story', methods=['GET'], endpoint='get_role_history')
+@require_token
+def get_role_history(token, role_id):
+    return changelog_controller.get_role_history(role_id, token)
+
 # Маршруты для Permission
 @app.route('/api/ref/policy/permission', methods=['GET'], endpoint='get_perms')
 @require_token
@@ -856,6 +1491,11 @@ def soft_delete_perm(token, perm_id):
 @require_token
 def restore_perm(token, perm_id):
     return perm_controller.restore(perm_id, token)
+
+@app.route('/api/ref/policy/permission/<int:perm_id>/story', methods=['GET'], endpoint='get_permission_history')
+@require_token
+def get_permission_history(token, perm_id):
+    return changelog_controller.get_permission_history(perm_id, token)
 
 # Маршруты для UsersAndRoles
 @app.route('/api/ref/user/<user_id>/role', methods=['GET'], endpoint='get_user_roles')
@@ -903,6 +1543,28 @@ def delete_role_perm(token, role_id, perm_id):
 @require_token
 def get_users(token):
     return user_controller.get_list(token)
+
+@app.route('/api/ref/user/<username>', methods=['PUT'], endpoint='update_user')
+@require_token
+def update_user(token, username):
+    data = request.get_json()
+    return user_controller.update(username, token, data)
+
+@app.route('/api/ref/user/<username>', methods=['DELETE'], endpoint='delete_user')
+@require_token
+def delete_user(token, username):
+    return user_controller.delete(username, token)
+
+@app.route('/api/ref/user/<user_id>/story', methods=['GET'], endpoint='get_user_history')
+@require_token
+def get_user_history(token, user_id):
+    return changelog_controller.get_user_history(user_id, token)
+
+# Маршрут для отката мутации
+@app.route('/api/ref/changelog/<int:log_id>/revert', methods=['POST'], endpoint='revert_mutation')
+@require_token
+def revert_mutation(token, log_id):
+    return changelog_controller.revert_mutation(log_id, token)
 
 if __name__ == '__main__':
     app.run(debug=True)

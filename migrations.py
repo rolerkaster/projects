@@ -18,9 +18,9 @@ def run_migrations():
             description TEXT,
             code TEXT NOT NULL UNIQUE,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            created_by INTEGER NOT NULL,
+            created_by TEXT NOT NULL,
             deleted_at TIMESTAMP,
-            deleted_by INTEGER
+            deleted_by TEXT
         )
     ''')
 
@@ -32,9 +32,9 @@ def run_migrations():
             description TEXT,
             code TEXT NOT NULL UNIQUE,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            created_by INTEGER NOT NULL,
+            created_by TEXT NOT NULL,
             deleted_at TIMESTAMP,
-            deleted_by INTEGER
+            deleted_by TEXT
         )
     ''')
 
@@ -45,9 +45,9 @@ def run_migrations():
             user_id TEXT NOT NULL,
             role_id INTEGER NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            created_by INTEGER NOT NULL,
+            created_by TEXT NOT NULL,
             deleted_at TIMESTAMP,
-            deleted_by INTEGER,
+            deleted_by TEXT,
             FOREIGN KEY (role_id) REFERENCES Roles(id)
         )
     ''')
@@ -59,9 +59,9 @@ def run_migrations():
             role_id INTEGER NOT NULL,
             permission_id INTEGER NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            created_by INTEGER NOT NULL,
+            created_by TEXT NOT NULL,
             deleted_at TIMESTAMP,
-            deleted_by INTEGER,
+            deleted_by TEXT,
             FOREIGN KEY (role_id) REFERENCES Roles(id),
             FOREIGN KEY (permission_id) REFERENCES Permissions(id)
         )
@@ -84,6 +84,19 @@ def run_migrations():
             token TEXT PRIMARY KEY,
             username TEXT NOT NULL,
             expires INTEGER NOT NULL
+        )
+    ''')
+
+    # Таблица ChangeLogs
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ChangeLogs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            before_change TEXT NOT NULL,
+            after_change TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_by TEXT NOT NULL
         )
     ''')
 
