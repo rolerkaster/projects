@@ -121,6 +121,27 @@ def run_migrations():
         )
     """)
 
+    # Таблица LogsRequests
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS LogsRequests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            api_path TEXT NOT NULL,
+            http_method TEXT NOT NULL,
+            controller_path TEXT NOT NULL,
+            controller_method TEXT NOT NULL,
+            request_body TEXT,
+            request_headers TEXT NOT NULL,
+            user_id TEXT,
+            ip_address TEXT NOT NULL,
+            user_agent TEXT NOT NULL,
+            response_status INTEGER NOT NULL,
+            response_body TEXT,
+            response_headers TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES Users(username)
+        )
+    ''')
+
     conn.commit()
     conn.close()
 

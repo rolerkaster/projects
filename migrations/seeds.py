@@ -19,7 +19,7 @@ def seed_data():
         )
 
         # Разрешения
-        entities = ["user", "role", "permission"]
+        entities = ["user", "role", "permission", "log"]
         permissions = []
         for entity in entities:
             for action in ["get-list", "read", "create", "update", "delete", "restore", "get-story"]:
