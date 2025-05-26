@@ -1,0 +1,50 @@
+2025-05-26 21:29:04,514 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2025-05-26 21:29:04,514 - [33mPress CTRL+C to quit[0m
+2025-05-26 21:29:04,515 -  * Restarting with stat
+2025-05-26 21:29:04,853 -  * Debugger is active!
+2025-05-26 21:29:04,855 -  * Debugger PIN: 974-333-676
+2025-05-26 21:29:06,946 - 127.0.0.1 - - [26/May/2025 21:29:06] "[31m[1mPOST /api/auth/register HTTP/1.1[0m" 400 -
+2025-05-26 21:29:13,717 - 127.0.0.1 - - [26/May/2025 21:29:13] "POST /api/auth/login HTTP/1.1" 200 -
+2025-05-26 21:29:17,299 - 127.0.0.1 - - [26/May/2025 21:29:17] "POST /api/auth/login HTTP/1.1" 200 -
+2025-05-26 21:41:21,268 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2025-05-26 21:41:21,268 - [33mPress CTRL+C to quit[0m
+2025-05-26 21:41:21,269 -  * Restarting with stat
+2025-05-26 21:41:21,613 -  * Debugger is active!
+2025-05-26 21:41:21,615 -  * Debugger PIN: 974-333-676
+2025-05-26 21:41:27,000 - 127.0.0.1 - - [26/May/2025 21:41:27] "POST /api/auth/login HTTP/1.1" 200 -
+2025-05-26 21:49:40,510 -  * Detected change in 'C:\\Users\\Nikita\\Desktop\\study\\app\\dtos\\log_request_dto.py', reloading
+2025-05-26 21:49:40,553 -  * Restarting with stat
+2025-05-26 21:49:40,906 -  * Debugger is active!
+2025-05-26 21:49:40,908 -  * Debugger PIN: 974-333-676
+2025-05-26 21:49:51,962 -  * Detected change in 'C:\\Users\\Nikita\\Desktop\\study\\app\\controllers\\log_request_controller.py', reloading
+2025-05-26 21:49:52,004 -  * Restarting with stat
+2025-05-26 21:49:52,359 -  * Debugger is active!
+2025-05-26 21:49:52,362 -  * Debugger PIN: 974-333-676
+2025-05-26 21:54:08,319 -  * Detected change in 'C:\\Users\\Nikita\\Desktop\\study\\app\\controllers\\log_request_controller.py', reloading
+2025-05-26 21:54:08,371 -  * Restarting with stat
+2025-05-26 21:54:08,735 -  * Debugger is active!
+2025-05-26 21:54:08,737 -  * Debugger PIN: 974-333-676
+2025-05-26 21:57:01,890 - 127.0.0.1 - - [26/May/2025 21:57:01] "POST /api/auth/login HTTP/1.1" 200 -
+2025-05-26 21:57:17,037 - 127.0.0.1 - - [26/May/2025 21:57:17] "[31m[1mPOST /api/ref/log/request HTTP/1.1[0m" 405 -
+2025-05-26 21:59:37,443 - 127.0.0.1 - - [26/May/2025 21:59:37] "[31m[1mPOST /api/ref/log/request HTTP/1.1[0m" 405 -
+2025-05-26 22:00:58,038 - 127.0.0.1 - - [26/May/2025 22:00:58] "[31m[1mPOST /api/ref/log/request HTTP/1.1[0m" 405 -
+2025-05-26 22:01:05,764 - 127.0.0.1 - - [26/May/2025 22:01:05] "GET /api/ref/log/request HTTP/1.1" 200 -
+2025-05-26 22:01:15,367 - 127.0.0.1 - - [26/May/2025 22:01:15] "GET /api/ref/log/request HTTP/1.1" 200 -
+2025-05-26 22:01:28,807 - 127.0.0.1 - - [26/May/2025 22:01:28] "[31m[1mGET /api/auth/me HTTP/1.1[0m" 401 -
+2025-05-26 22:01:36,360 - 127.0.0.1 - - [26/May/2025 22:01:36] "GET /api/ref/log/request HTTP/1.1" 200 -
+2025-05-26 22:01:57,497 - 127.0.0.1 - - [26/May/2025 22:01:57] "GET /api/ref/log/request HTTP/1.1" 200 -
+2025-05-26 22:02:49,007 - 127.0.0.1 - - [26/May/2025 22:02:49] "GET /api/ref/log/request/1 HTTP/1.1" 200 -
+2025-05-26 22:03:08,294 - 127.0.0.1 - - [26/May/2025 22:03:08] "GET /api/ref/log/request/3 HTTP/1.1" 200 -
+2025-05-26 22:03:38,769 - 127.0.0.1 - - [26/May/2025 22:03:38] "GET /api/ref/log/request/3 HTTP/1.1" 200 -
+2025-05-26 22:03:58,375 - 127.0.0.1 - - [26/May/2025 22:03:58] "[35m[1mDELETE /api/ref/log/request/3 HTTP/1.1[0m" 204 -
+2025-05-26 22:07:37,796 -  * Detected change in 'C:\\Users\\Nikita\\Desktop\\study\\app\\controllers\\log_request_controller.py', reloading
+2025-05-26 22:07:37,838 -  * Restarting with stat
+2025-05-26 22:07:38,212 -  * Debugger is active!
+2025-05-26 22:07:38,215 -  * Debugger PIN: 974-333-676
+2025-05-26 22:07:56,296 -  * Detected change in 'C:\\Users\\Nikita\\Desktop\\study\\app\\controllers\\log_request_controller.py', reloading
+2025-05-26 22:07:56,350 -  * Restarting with stat
+2025-05-26 22:07:56,755 -  * Debugger is active!
+2025-05-26 22:07:56,758 -  * Debugger PIN: 974-333-676
+2025-05-26 22:08:06,798 - 127.0.0.1 - - [26/May/2025 22:08:06] "DELETE /api/ref/log/request/5 HTTP/1.1" 200 -
