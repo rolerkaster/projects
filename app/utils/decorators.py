@@ -1,9 +1,10 @@
 import time
-from flask import jsonify, request
+from flask import jsonify, request, g
 import jwt
 from app.utils.database import get_db_connection
 from app.config import SECRET_KEY
 from functools import wraps
+from app.models.user import User
 
 def require_token(f):
     @wraps(f)
@@ -16,10 +17,25 @@ def require_token(f):
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM Tokens WHERE token = ? AND expires > ?", (token, int(time.time())))
             token_data = cursor.fetchone()
-            conn.close()
             if not token_data:
+                conn.close()
                 return jsonify({"error": "Invalid or expired token"}), 401
-            jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+            
+            # Декодируем токен для получения username
+            payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+            username = payload['username']
+            
+            # Получаем информацию о пользователе
+            cursor.execute("SELECT * FROM Users WHERE username = ?", (username,))
+            user_data = cursor.fetchone()
+            conn.close()
+            
+            if not user_data:
+                return jsonify({"error": "User not found"}), 401
+                
+            # Устанавливаем информацию о пользователе в g.user
+            g.user = User(**dict(user_data))
+            
         except jwt.InvalidTokenError:
             return jsonify({"error": "Invalid token"}), 401
         except Exception as e:
