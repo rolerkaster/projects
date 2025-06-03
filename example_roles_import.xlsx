@@ -1,0 +1,5 @@
+name,description,code
+Admin,Администратор системы,ADMIN
+User,Обычный пользователь,USER
+Manager,Менеджер проектов,MANAGER
+Support,Служба поддержки,SUPPORT 

@@ -1,0 +1,30 @@
+{
+  "report_info": {
+    "type": "System Usage Statistics",
+    "start_date": "2025-06-02T16:48:18.529510",
+    "end_date": "2025-06-03T16:48:18.529510",
+    "generated_at": "2025-06-03T16:48:18.529524"
+  },
+  "method_statistics": [
+    {
+      "method": "POST /api/auth/login",
+      "call_count": 1,
+      "last_call": "2025-06-03 11:30:13"
+    },
+    {
+      "method": "POST /api/export-import/import/users",
+      "call_count": 1,
+      "last_call": "2025-06-03 11:29:20"
+    }
+  ],
+  "entity_statistics": [],
+  "user_statistics": [
+    {
+      "user_id": "anonymous",
+      "request_count": 2,
+      "auth_count": 1,
+      "change_count": 0,
+      "last_activity": "2025-06-03 11:30:13"
+    }
+  ]
+}

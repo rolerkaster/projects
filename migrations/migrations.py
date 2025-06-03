@@ -39,6 +39,14 @@ def run_migrations():
         )
     ''')
 
+    # Добавляем разрешения для экспорта и импорта
+    cursor.execute('''
+        INSERT OR IGNORE INTO Permissions (name, description, code, created_by)
+        VALUES 
+            ('export_data', 'Разрешение на экспорт данных', 'EXPORT_DATA', 'system'),
+            ('import_data', 'Разрешение на импорт данных', 'IMPORT_DATA', 'system')
+    ''')
+
     # Таблица UsersAndRoles
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS UsersAndRoles (

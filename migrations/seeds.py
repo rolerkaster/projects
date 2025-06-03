@@ -24,6 +24,13 @@ def seed_data():
         for entity in entities:
             for action in ["get-list", "read", "create", "update", "delete", "restore", "get-story"]:
                 permissions.append((f"{action}-{entity}", f"{action} {entity}", f"{action}-{entity}", "system"))
+        
+        # Добавляем разрешения для экспорта/импорта
+        permissions.extend([
+            ("export_data", "Разрешение на экспорт данных", "EXPORT_DATA", "system"),
+            ("import_data", "Разрешение на импорт данных", "IMPORT_DATA", "system")
+        ])
+        
         cursor.executemany(
             'INSERT OR REPLACE INTO Permissions (name, description, code, created_at, created_by) VALUES (?, ?, ?, ?, ?)',
             [(p[0], p[1], p[2], datetime.now().isoformat(), p[3]) for p in permissions]
@@ -43,11 +50,13 @@ def seed_data():
             admin_perms
         )
 
-        # User: ограниченные разрешения
+        # User: ограниченные разрешения + импорт/экспорт
         user_perms = [
             (role_ids["user"], perm_ids["get-list-user"], datetime.now().isoformat(), "system"),
             (role_ids["user"], perm_ids["read-user"], datetime.now().isoformat(), "system"),
-            (role_ids["user"], perm_ids["update-user"], datetime.now().isoformat(), "system")
+            (role_ids["user"], perm_ids["update-user"], datetime.now().isoformat(), "system"),
+            (role_ids["user"], perm_ids["EXPORT_DATA"], datetime.now().isoformat(), "system"),
+            (role_ids["user"], perm_ids["IMPORT_DATA"], datetime.now().isoformat(), "system")
         ]
         cursor.executemany(
             'INSERT OR REPLACE INTO RolesAndPermissions (role_id, permission_id, created_at, created_by) VALUES (?, ?, ?, ?)',
